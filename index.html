@@ -6,7 +6,6 @@
     <title>天台機械人操作版本</title>
     <!-- 引入 ml5.js 用於鏡頭機器學習 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
-    <!-- 將 ml5.js 版本固定為 0.12.2 避免 featureExtractor 找不到的問題 -->
     <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; padding: 20px; margin: 0; }
@@ -90,7 +89,7 @@
             <!-- 按鈕由 JS 動態生成 -->
         </div>
         
-        <!-- 新增: Microbit 通訊記錄框 -->
+        <!-- Microbit 通訊記錄框 -->
         <div class="serial-log">
             <div class="log-title">Microbit 通訊記錄</div>
             <div id="logContent" class="log-content"></div>
@@ -113,7 +112,6 @@
                 <button class="learn-btn" data-class="1">學習 Class 2 (正常地磚)</button>
                 <button class="learn-btn" data-class="2">學習 Class 3 (裂縫牆身)</button>
                 <button class="learn-btn" data-class="3">學習 Class 4 (正常牆身)</button>
-                <button class="learn-btn" data-class="4" style="background-color:#757575;">學習 背景 (排除干擾)</button>
             </div>
         </div>
 
@@ -526,8 +524,8 @@
     ========================================= */
     const video = document.getElementById('webcam');
     const flipBtn = document.getElementById('flipBtn');
-    const classNames = ["Class 1 (裂縫地磚)", "Class 2 (正常地磚)", "Class 3 (裂縫牆身)", "Class 4 (正常牆身)", "背景 (排除干擾)"];
-    let exampleCounts = [0, 0, 0, 0, 0];
+    const classNames = ["Class 1 (裂縫地磚)", "Class 2 (正常地磚)", "Class 3 (裂縫牆身)", "Class 4 (正常牆身)"];
+    let exampleCounts = [0, 0, 0, 0];
     
     let featureExtractor;
     let knnClassifier;
@@ -576,19 +574,15 @@
     learnBtns.forEach(btn => {
         let cId = parseInt(btn.getAttribute('data-class'));
         
-        const startLearning = (e) => {
-            // 防護機制，避免部分裝置同時觸發 touchstart 和 mousedown
-            if (e && e.cancelable) e.preventDefault(); 
+        const startLearning = () => {
             if (!knnClassifier || isLearning) return;
-            
             isLearning = true;
             clearInterval(addExampleInterval); // 確保前一個計時器被清空
             addExample(cId); // 立即學習一張
             addExampleInterval = setInterval(() => addExample(cId), 100); // 持續學習
         };
 
-        const stopLearning = (e) => {
-            if (e && e.cancelable) e.preventDefault();
+        const stopLearning = () => {
             isLearning = false;
             clearInterval(addExampleInterval);
         };
@@ -598,13 +592,16 @@
         btn.addEventListener('mouseleave', stopLearning);
         
         // 支援觸控螢幕
-        btn.addEventListener('touchstart', startLearning, {passive: false});
-        btn.addEventListener('touchend', stopLearning, {passive: false});
+        btn.addEventListener('touchstart', startLearning);
+        btn.addEventListener('touchend', stopLearning);
     });
 
     function addExample(classIndex) {
         // 確保視訊已加載，且模型已準備好
-        if (!featureExtractor || !knnClassifier || video.readyState < 2) return;
+        if (!featureExtractor || !knnClassifier || video.readyState < 2) {
+            console.log("尚未準備好提取特徵");
+            return;
+        }
         try {
             const features = featureExtractor.infer(video);
             knnClassifier.addExample(features, classIndex.toString());
