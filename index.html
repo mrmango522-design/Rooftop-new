@@ -472,7 +472,7 @@
             btnReady.className = 'action-btn';
             btnReady.innerText = '設置機械人';
             btnReady.onclick = () => {
-                sendCommand('Ground Ready');
+                sendCommand('GR');
                 robot.x = 0; robot.y = 0; robot.animX = 0; robot.animY = 0;
                 isPatrolling = false; patrolIndex = 0;
             };
@@ -481,7 +481,7 @@
             btnStart.className = 'action-btn';
             btnStart.innerText = '開始巡航檢查';
             btnStart.onclick = () => {
-                sendCommand('Ground Start');
+                sendCommand('GS');
                 isPatrolling = true;
                 patrolIndex = 0;
                 robot.x = patrolPath[0].x; robot.y = patrolPath[0].y;
