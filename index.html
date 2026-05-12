@@ -6,7 +6,8 @@
     <title>天台機械人操作版本</title>
     <!-- 引入 ml5.js 用於鏡頭機器學習 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
-    <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+    <!-- 將 ml5.js 版本固定為 0.12.2 避免 featureExtractor 找不到的問題 -->
+    <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; padding: 20px; margin: 0; }
         h1 { text-align: center; color: #333; }
@@ -52,7 +53,7 @@
         td { color: #555; }
 
         /* --- 狀態及按鈕列的新增通訊記錄樣式 --- */
-        .serial-log { margin-top: 20px; background: #2c3e50; border-radius: 8px; padding: 10px; color: #ecf0f1; font-family: monospace; font-size: 14px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }
+        .serial-log { margin-top: 20px; background: #2c3e50; border-radius: 8px; padding: 10px; color: #ecf0f1; font-family: monospace; font-size: 14px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); width: 100%; box-sizing: border-box; }
         .log-title { font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #7f8c8d; padding-bottom: 5px; color: #bdc3c7; }
         .log-content { height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
         .log-sent { color: #4CAF50; }
@@ -543,15 +544,7 @@
         video.classList.toggle('flipped');
     });
 
-    // 初始化 ml5
-    featureExtractor = ml5.featureExtractor('MobileNet', modelReady);
-    
-    function modelReady() {
-        knnClassifier = ml5.knnClassifier();
-        initTable();
-    }
-
-    // 建立結果表格
+    // 建立結果表格 (移出 modelReady 讓他一載入網頁就先畫出來)
     const tbody = document.getElementById('resultTableBody');
     function initTable() {
         tbody.innerHTML = '';
@@ -564,6 +557,17 @@
             `;
             tbody.appendChild(tr);
         });
+    }
+    
+    // 立即初始化表格 UI
+    initTable();
+
+    // 初始化 ml5
+    featureExtractor = ml5.featureExtractor('MobileNet', modelReady);
+    
+    function modelReady() {
+        console.log("ml5 模型已載入");
+        knnClassifier = ml5.knnClassifier();
     }
 
     // 學習按鈕邏輯 (長按每 0.1 秒學習一次)
@@ -590,6 +594,7 @@
     });
 
     function addExample(classIndex) {
+        if (!featureExtractor) return;
         const features = featureExtractor.infer(video);
         knnClassifier.addExample(features, classIndex.toString());
         exampleCounts[classIndex]++;
