@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>天台機械人操作版本</title>
+    <!-- 引入 ml5.js 用於鏡頭機器學習 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+    <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0f2f5; padding: 20px; margin: 0; }
+        h1 { text-align: center; color: #333; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 8px 16px rgba(0,0,0,0.1); }
+        
+        /* 頂部連接與選擇區 */
+        .header-controls { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: center; padding-bottom: 15px; border-bottom: 2px solid #eee; }
+        select, button { padding: 10px 15px; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; cursor: pointer; transition: all 0.2s; }
+        select { background-color: #fff; }
+        button:hover { background-color: #e0e0e0; transform: translateY(-1px); }
+        button:active { transform: translateY(1px); }
+        .serial-btn { background-color: #4CAF50; color: white; border: none; font-weight: bold; box-shadow: 0 4px 6px rgba(76, 175, 80, 0.3); }
+        .serial-btn:hover { background-color: #45a049; }
+
+        /* 三大區域通用樣式 */
+        .section { margin-bottom: 30px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #fafafa; }
+        h2 { font-size: 18px; color: #444; margin-top: 0; border-bottom: 2px solid #e0e0e0; padding-bottom: 10px; margin-bottom: 15px; }
+
+        /* --- 互動顯視格 (Area 1 - Canvas) --- */
+        .canvas-container { display: flex; justify-content: center; align-items: center; width: 100%; overflow: hidden; background-color: #2c3e50; border-radius: 8px; box-shadow: inset 0 4px 8px rgba(0,0,0,0.2); }
+        canvas { max-width: 100%; height: auto; cursor: default; }
+
+        /* --- 狀態及按鈕列 (Area 2) --- */
+        #statusArea { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+        .action-btn { background-color: #2196F3; color: white; border: none; font-weight: bold; box-shadow: 0 4px 6px rgba(33, 150, 243, 0.3); }
+        .action-btn:hover { background-color: #1e88e5; }
+
+        /* --- 鏡頭辨認與學習 (Area 3) --- */
+        .camera-section { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .camera-container { display: flex; gap: 30px; align-items: flex-start; width: 100%; flex-wrap: wrap; justify-content: center; }
+        .video-wrapper { display: flex; flex-direction: column; align-items: center; gap: 10px; background: #fff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        video { width: 320px; height: 240px; background: #000; border-radius: 8px; transform: scaleX(1); transition: transform 0.3s; object-fit: cover; }
+        video.flipped { transform: scaleX(-1); }
+        
+        .learning-controls { display: flex; flex-direction: column; gap: 10px; width: 280px; }
+        .learn-btn { background-color: #FF9800; color: white; border: none; user-select: none; font-weight: 500; box-shadow: 0 2px 4px rgba(255, 152, 0, 0.3); }
+        .learn-btn:active { background-color: #e68a00; transform: scale(0.98); }
+        .toggle-predict { background-color: #9C27B0; color: white; font-weight: bold; border: none; width: 100%; box-shadow: 0 4px 6px rgba(156, 39, 176, 0.3); }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        th, td { border: 1px solid #eee; padding: 12px; text-align: center; }
+        th { background-color: #f8f9fa; color: #333; font-weight: 600; }
+        td { color: #555; }
+
+        /* --- 狀態及按鈕列的新增通訊記錄樣式 --- */
+        .serial-log { margin-top: 20px; background: #2c3e50; border-radius: 8px; padding: 10px; color: #ecf0f1; font-family: monospace; font-size: 14px; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }
+        .log-title { font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #7f8c8d; padding-bottom: 5px; color: #bdc3c7; }
+        .log-content { height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+        .log-sent { color: #4CAF50; }
+        .log-received { color: #64B5F6; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>天台機械人操作版本 (Canvas 渲染)</h1>
+    
+    <div class="header-controls">
+        <select id="modeSelect">
+            <option value="ground">檢查地面</option>
+            <option value="innerWall">檢查內牆身</option>
+            <option value="outerWall">檢查外牆身</option>
+            <option value="manual">手動操控</option>
+        </select>
+        <button id="connectBtn" class="serial-btn">連接 Microbit (Serial)</button>
+    </div>
+
+    <!-- 互動顯視格 -->
+    <div class="section" id="displaySection">
+        <h2>互動顯視格</h2>
+        <div class="canvas-container">
+            <canvas id="simCanvas" width="800" height="400"></canvas>
+        </div>
+    </div>
+
+    <!-- 狀態及按鈕列 -->
+    <div class="section">
+        <h2>狀態及按鈕列</h2>
+        <div id="statusArea">
+            <!-- 按鈕由 JS 動態生成 -->
+        </div>
+        
+        <!-- 新增: Microbit 通訊記錄框 -->
+        <div class="serial-log">
+            <div class="log-title">Microbit 通訊記錄</div>
+            <div id="logContent" class="log-content"></div>
+        </div>
+    </div>
+
+    <!-- 鏡頭辨認與學習 -->
+    <div class="section camera-section">
+        <h2>鏡頭辨認與學習</h2>
+        <div class="camera-container">
+            <div class="video-wrapper">
+                <button class="toggle-predict" id="togglePredictBtn">開始辨認</button>
+                <video id="webcam" autoplay playsinline muted></video>
+                <button id="flipBtn" style="width: 100%;">水平翻轉影像</button>
+            </div>
+            
+            <div class="learning-controls">
+                <p style="margin:0; font-size:13px; color:#7f8c8d; text-align: center;">*長按按鈕進行學習 (每0.1秒截取)*</p>
+                <button class="learn-btn" data-class="0">學習 Class 1 (裂縫地磚)</button>
+                <button class="learn-btn" data-class="1">學習 Class 2 (正常地磚)</button>
+                <button class="learn-btn" data-class="2">學習 Class 3 (裂縫牆身)</button>
+                <button class="learn-btn" data-class="3">學習 Class 4 (正常牆身)</button>
+                <button class="learn-btn" data-class="4" style="background-color:#757575;">學習 背景 (排除干擾)</button>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>類別</th>
+                    <th>相似度 (%)</th>
+                    <th>已學習相片數量</th>
+                </tr>
+            </thead>
+            <tbody id="resultTableBody">
+                <!-- 由 JS 填入 -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    /* =========================================
+       Web Serial API 邏輯 (連接 Microbit)
+    ========================================= */
+    let port;
+    let writer;
+    let reader;
+
+    // 新增: 寫入通訊記錄 UI 的功能
+    function logMessage(type, text) {
+        const logContent = document.getElementById('logContent');
+        if (!logContent) return;
+        const entry = document.createElement('div');
+        const time = new Date().toLocaleTimeString();
+        if (type === 'sent') {
+            entry.className = 'log-sent';
+            entry.innerText = `[${time}] 發送: ${text}`;
+        } else {
+            entry.className = 'log-received';
+            entry.innerText = `[${time}] 接收: ${text}`;
+        }
+        logContent.appendChild(entry);
+        logContent.scrollTop = logContent.scrollHeight; // 自動捲動到底部
+    }
+
+    // 新增: 讀取 Microbit 傳來資料的迴圈
+    async function readLoop() {
+        const textDecoder = new TextDecoderStream();
+        const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+        reader = textDecoder.readable.getReader();
+        let buffer = "";
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                if (value) {
+                    buffer += value;
+                    let lines = buffer.split('\n');
+                    buffer = lines.pop(); // 保留不完整的最後一行
+                    for (let line of lines) {
+                        let cleanLine = line.replace('\r', '').trim();
+                        if (cleanLine) logMessage('received', cleanLine);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error("讀取錯誤:", error);
+            logMessage('received', "讀取錯誤: " + error.message);
+        } finally {
+            reader.releaseLock();
+        }
+    }
+
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+        if (!navigator.serial) {
+            alert("你的瀏覽器不支援 Web Serial API，請使用 Chrome 或 Edge 電腦版。");
+            return;
+        }
+        try {
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: 115200 }); // Microbit 預設 Baud Rate
+            writer = port.writable.getWriter();
+            
+            document.getElementById('connectBtn').innerText = "已連接 Microbit";
+            document.getElementById('connectBtn').style.backgroundColor = "#2e7d32";
+            alert("成功連接 Microbit！");
+            logMessage('received', '系統: 已建立 Serial 連接');
+            
+            // 啟動讀取迴圈，監聽 Microbit 回傳的文字
+            readLoop();
+            
+        } catch (error) {
+            console.error("Serial 連接錯誤:", error);
+            logMessage('received', "系統: 連接錯誤 (" + error.message + ")");
+        }
+    });
+
+    async function sendCommand(text) {
+        if (!writer) {
+            console.warn("未連接 Microbit，模擬發送指令:", text);
+            logMessage('sent', text + " (模擬)");
+            return;
+        }
+        try {
+            const encoder = new TextEncoder();
+            // 發送字串並加上換行符，以利 Microbit Python/MakeCode 讀取
+            await writer.write(encoder.encode(text + "\r\n")); 
+            console.log("已發送:", text);
+            logMessage('sent', text);
+        } catch (error) {
+            console.error("發送錯誤:", error);
+            logMessage('sent', "系統: 發送失敗 (" + error.message + ")");
+        }
+    }
+
+    /* =========================================
+       Canvas 渲染與動畫邏輯
+    ========================================= */
+    const canvas = document.getElementById('simCanvas');
+    const ctx = canvas.getContext('2d');
+    const modeSelect = document.getElementById('modeSelect');
+    const statusArea = document.getElementById('statusArea');
+    
+    let currentMode = 'ground';
+    
+    // 機械人狀態 (用於 Ground 模式)
+    let robot = { x: 0, y: 0, animX: 0, animY: 0 };
+    let patrolPath = [];
+    let patrolIndex = 0;
+    let isPatrolling = false;
+    let lastMoveTime = 0;
+
+    // 產生 5x5 的 S 型巡航路徑
+    for (let y = 0; y < 5; y++) {
+        if (y % 2 === 0) {
+            for (let x = 0; x < 5; x++) patrolPath.push({x, y});
+        } else {
+            for (let x = 4; x >= 0; x--) patrolPath.push({x, y});
+        }
+    }
+
+    // 手動操控按鈕設定
+    const manualBtns = [
+        { id: 'up', text: '↑', x: 200, y: 100, w: 70, h: 70, cmd: 'Move Up', isPressed: false },
+        { id: 'down', text: '↓', x: 200, y: 260, w: 70, h: 70, cmd: 'Move Down', isPressed: false },
+        { id: 'left', text: '←', x: 120, y: 180, w: 70, h: 70, cmd: 'Move Left', isPressed: false },
+        { id: 'right', text: '→', x: 280, y: 180, w: 70, h: 70, cmd: 'Move Right', isPressed: false },
+        { id: 'rise', text: '升起 ▲', x: 500, y: 130, w: 140, h: 60, cmd: 'Rise', isPressed: false },
+        { id: 'lower', text: '降低 ▼', x: 500, y: 220, w: 140, h: 60, cmd: 'Lower', isPressed: false }
+    ];
+
+    // 主渲染迴圈
+    function render(time) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (currentMode === 'ground') {
+            drawGround(time);
+        } else if (currentMode === 'innerWall' || currentMode === 'outerWall') {
+            drawWall();
+        } else if (currentMode === 'manual') {
+            drawManualControls();
+        }
+
+        requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+
+    // --- 繪製地面模式 (5x5 Isometric Grid) ---
+    function drawGround(time) {
+        const tileW = 60;
+        const tileH = 30;
+        const originX = canvas.width / 2;
+        const originY = 80;
+
+        // 處理巡航動畫邏輯
+        if (isPatrolling && time - lastMoveTime > 1000) {
+            lastMoveTime = time;
+            patrolIndex++;
+            if (patrolIndex >= patrolPath.length) {
+                isPatrolling = false; // 巡航結束
+            } else {
+                robot.x = patrolPath[patrolIndex].x;
+                robot.y = patrolPath[patrolIndex].y;
+            }
+        }
+
+        // 平滑插值動畫 (Lerp)
+        robot.animX += (robot.x - robot.animX) * 0.1;
+        robot.animY += (robot.y - robot.animY) * 0.1;
+
+        // 畫地磚
+        for (let r = 0; r < 5; r++) {
+            for (let c = 0; c < 5; c++) {
+                let sx = originX + (c - r) * tileW;
+                let sy = originY + (c + r) * tileH;
+                
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(sx + tileW, sy + tileH);
+                ctx.lineTo(sx, sy + tileH * 2);
+                ctx.lineTo(sx - tileW, sy + tileH);
+                ctx.closePath();
+                
+                ctx.fillStyle = (c%2 === r%2) ? '#bdc3c7' : '#ecf0f1';
+                ctx.fill();
+                ctx.strokeStyle = '#7f8c8d';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // 格子座標文字
+                ctx.fillStyle = '#95a5a6';
+                ctx.font = '10px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${c},${r}`, sx, sy + tileH + 4);
+            }
+        }
+
+        // 畫機械人
+        let rx = originX + (robot.animX - robot.animY) * tileW;
+        let ry = originY + (robot.animX + robot.animY) * tileH + tileH; // 中心點
+        
+        ctx.fillStyle = '#e74c3c';
+        // 畫個簡單立體的機械人方塊
+        ctx.fillRect(rx - 15, ry - 35, 30, 30);
+        ctx.fillStyle = '#c0392b';
+        ctx.fillRect(rx + 15, ry - 35, 5, 30); // 右側陰影
+        ctx.fillRect(rx - 15, ry - 5, 30, 5);  // 底部陰影
+        
+        // 機械人眼睛
+        ctx.fillStyle = 'white';
+        ctx.fillRect(rx - 8, ry - 25, 6, 6);
+        ctx.fillRect(rx + 2, ry - 25, 6, 6);
+        ctx.fillStyle = 'black';
+        ctx.fillRect(rx - 6, ry - 23, 2, 2);
+        ctx.fillRect(rx + 4, ry - 23, 2, 2);
+    }
+
+    // --- 繪製牆身模式 ---
+    function drawWall() {
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2 + 20;
+
+        ctx.save();
+        // 模擬 45 度視角變形
+        ctx.translate(cx, cy);
+        ctx.scale(1, 0.5);
+        ctx.rotate(-Math.PI / 4);
+
+        // 畫牆面
+        ctx.fillStyle = currentMode === 'innerWall' ? '#81c784' : '#64b5f6';
+        ctx.fillRect(-150, -150, 300, 300);
+        
+        // 畫網格線增加立體感
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 2;
+        for(let i = -150; i <= 150; i+= 50) {
+            ctx.beginPath(); ctx.moveTo(i, -150); ctx.lineTo(i, 150); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(-150, i); ctx.lineTo(150, i); ctx.stroke();
+        }
+
+        ctx.restore();
+
+        // 標題文字
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 28px Arial';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = "rgba(0,0,0,0.5)";
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = 2;
+        let text = currentMode === 'innerWall' ? '內牆身視角' : '外牆身視角';
+        ctx.fillText(text, cx, cy - 80);
+        ctx.shadowColor = "transparent"; // reset
+    }
+
+    // --- 繪製手動操控模式 ---
+    function drawManualControls() {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        manualBtns.forEach(btn => {
+            // 畫按鈕背景
+            ctx.fillStyle = btn.isPressed ? '#1565C0' : '#2196F3';
+            ctx.beginPath();
+            ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10); // HTML5 Canvas 圓角矩形
+            ctx.fill();
+            
+            // 按鈕陰影/邊框
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#0d47a1';
+            ctx.stroke();
+
+            // 畫文字
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 20px Arial';
+            ctx.fillText(btn.text, btn.x + btn.w/2, btn.y + btn.h/2);
+        });
+
+        // 標示文字
+        ctx.fillStyle = '#ecf0f1';
+        ctx.font = '16px Arial';
+        ctx.fillText('方向操控 (D-Pad)', 235, 50);
+        ctx.fillText('高度操控 (Z-Axis)', 570, 80);
+    }
+
+    // --- Canvas 滑鼠互動 (用於手動操控) ---
+    function getMousePos(evt) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (evt.clientX - rect.left) * scaleX,
+            y: (evt.clientY - rect.top) * scaleY
+        };
+    }
+
+    function handleCanvasInteract(evt, isDown) {
+        if (currentMode !== 'manual') return;
+        const pos = getMousePos(evt);
+        let clicked = false;
+
+        manualBtns.forEach(btn => {
+            if (pos.x >= btn.x && pos.x <= btn.x + btn.w &&
+                pos.y >= btn.y && pos.y <= btn.y + btn.h) {
+                if (isDown && !btn.isPressed) {
+                    btn.isPressed = true;
+                    sendCommand(btn.cmd);
+                } else if (!isDown) {
+                    btn.isPressed = false;
+                }
+                clicked = true;
+            } else if (!isDown) {
+                btn.isPressed = false;
+            }
+        });
+
+        if (isDown) canvas.style.cursor = clicked ? 'pointer' : 'default';
+        else canvas.style.cursor = 'default';
+    }
+
+    canvas.addEventListener('mousedown', (e) => handleCanvasInteract(e, true));
+    canvas.addEventListener('mouseup', (e) => handleCanvasInteract(e, false));
+    canvas.addEventListener('mouseleave', (e) => handleCanvasInteract(e, false));
+    // 觸控支援
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleCanvasInteract(e.touches[0], true); }, {passive: false});
+    canvas.addEventListener('touchend', (e) => { e.preventDefault(); handleCanvasInteract(e.changedTouches[0], false); }, {passive: false});
+
+
+    /* =========================================
+       UI 模式切換邏輯 (狀態列按鈕生成)
+    ========================================= */
+    function renderMode() {
+        currentMode = modeSelect.value;
+        statusArea.innerHTML = '';
+        isPatrolling = false;
+
+        if (currentMode === 'ground') {
+            const btnReady = document.createElement('button');
+            btnReady.className = 'action-btn';
+            btnReady.innerText = '設置機械人';
+            btnReady.onclick = () => {
+                sendCommand('Ground Ready');
+                robot.x = 0; robot.y = 0; robot.animX = 0; robot.animY = 0;
+                isPatrolling = false; patrolIndex = 0;
+            };
+
+            const btnStart = document.createElement('button');
+            btnStart.className = 'action-btn';
+            btnStart.innerText = '開始巡航檢查';
+            btnStart.onclick = () => {
+                sendCommand('Ground Start');
+                isPatrolling = true;
+                patrolIndex = 0;
+                robot.x = patrolPath[0].x; robot.y = patrolPath[0].y;
+                lastMoveTime = performance.now();
+            };
+
+            statusArea.appendChild(btnReady);
+            statusArea.appendChild(btnStart);
+
+        } else if (currentMode === 'innerWall' || currentMode === 'outerWall') {
+            const prefix = currentMode === 'innerWall' ? 'In' : 'Out';
+            const label = currentMode === 'innerWall' ? '內牆' : '外牆';
+
+            const btnReady = document.createElement('button');
+            btnReady.className = 'action-btn';
+            btnReady.innerText = '重設位置';
+            btnReady.onclick = () => sendCommand(`${prefix} Ready`);
+
+            const btnStart = document.createElement('button');
+            btnStart.className = 'action-btn';
+            btnStart.innerText = `開始檢查${label}`;
+            btnStart.onclick = () => sendCommand(`${prefix} Start`);
+
+            statusArea.appendChild(btnReady);
+            statusArea.appendChild(btnStart);
+
+        } else if (currentMode === 'manual') {
+            const btnReady = document.createElement('button');
+            btnReady.className = 'action-btn';
+            btnReady.innerText = '重設位置';
+            btnReady.onclick = () => sendCommand('Control Ready');
+            statusArea.appendChild(btnReady);
+        }
+    }
+
+    modeSelect.addEventListener('change', renderMode);
+    renderMode(); // 初始化介面
+
+    /* =========================================
+       機器學習與鏡頭辨認 (ml5.js KNN Classifier)
+    ========================================= */
+    const video = document.getElementById('webcam');
+    const flipBtn = document.getElementById('flipBtn');
+    const classNames = ["Class 1 (裂縫地磚)", "Class 2 (正常地磚)", "Class 3 (裂縫牆身)", "Class 4 (正常牆身)", "背景 (排除干擾)"];
+    let exampleCounts = [0, 0, 0, 0, 0];
+    
+    let featureExtractor;
+    let knnClassifier;
+    let isPredicting = false;
+    let addExampleInterval;
+
+    // 啟動鏡頭
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then(stream => { video.srcObject = stream; })
+        .catch(err => { console.error("無法存取鏡頭:", err); });
+
+    // 翻轉鏡頭
+    flipBtn.addEventListener('click', () => {
+        video.classList.toggle('flipped');
+    });
+
+    // 初始化 ml5
+    featureExtractor = ml5.featureExtractor('MobileNet', modelReady);
+    
+    function modelReady() {
+        knnClassifier = ml5.knnClassifier();
+        initTable();
+    }
+
+    // 建立結果表格
+    const tbody = document.getElementById('resultTableBody');
+    function initTable() {
+        tbody.innerHTML = '';
+        classNames.forEach((name, index) => {
+            let tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${name}</td>
+                <td id="conf-${index}" style="font-weight:bold;">0.0%</td>
+                <td id="count-${index}">0</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // 學習按鈕邏輯 (長按每 0.1 秒學習一次)
+    const learnBtns = document.querySelectorAll('.learn-btn');
+    learnBtns.forEach(btn => {
+        let cId = parseInt(btn.getAttribute('data-class'));
+        
+        const startLearning = () => {
+            if(!knnClassifier) return;
+            addExample(cId); // 立即學習一張
+            addExampleInterval = setInterval(() => addExample(cId), 100); // 持續學習
+        };
+        const stopLearning = () => {
+            clearInterval(addExampleInterval);
+        };
+
+        btn.addEventListener('mousedown', startLearning);
+        btn.addEventListener('mouseup', stopLearning);
+        btn.addEventListener('mouseleave', stopLearning);
+        
+        // 支援觸控螢幕
+        btn.addEventListener('touchstart', (e) => { e.preventDefault(); startLearning(); }, {passive: false});
+        btn.addEventListener('touchend', (e) => { e.preventDefault(); stopLearning(); }, {passive: false});
+    });
+
+    function addExample(classIndex) {
+        const features = featureExtractor.infer(video);
+        knnClassifier.addExample(features, classIndex.toString());
+        exampleCounts[classIndex]++;
+        document.getElementById(`count-${classIndex}`).innerText = exampleCounts[classIndex];
+    }
+
+    // 辨認邏輯
+    const togglePredictBtn = document.getElementById('togglePredictBtn');
+    togglePredictBtn.addEventListener('click', () => {
+        if (!knnClassifier || knnClassifier.getNumLabels() === 0) {
+            alert("請先長按學習按鈕提供學習相片！");
+            return;
+        }
+        isPredicting = !isPredicting;
+        if (isPredicting) {
+            togglePredictBtn.innerText = "停止辨認";
+            togglePredictBtn.style.backgroundColor = "#E91E63";
+            predictLoop();
+        } else {
+            togglePredictBtn.innerText = "開始辨認";
+            togglePredictBtn.style.backgroundColor = "#9C27B0";
+            // 歸零顯示
+            classNames.forEach((_, i) => document.getElementById(`conf-${i}`).innerText = "0.0%");
+        }
+    });
+
+    function predictLoop() {
+        if (!isPredicting) return;
+        const features = featureExtractor.infer(video);
+        knnClassifier.classify(features, (err, result) => {
+            if (err) console.error(err);
+            if (result && result.confidencesByLabel) {
+                // 更新相似度
+                classNames.forEach((_, i) => {
+                    let conf = result.confidencesByLabel[i.toString()] || 0;
+                    let el = document.getElementById(`conf-${i}`);
+                    el.innerText = (conf * 100).toFixed(1) + "%";
+                    // 若大於 50% 特別標示顏色
+                    el.style.color = conf > 0.5 ? '#4CAF50' : '#555';
+                });
+            }
+            // 使用 requestAnimationFrame 達到流暢度
+            requestAnimationFrame(predictLoop);
+        });
+    }
+</script>
+</body>
+</html>
