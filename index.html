@@ -63,7 +63,7 @@
 <body>
 
 <div class="container">
-    <h1>天台機械人操作版本 (Canvas 渲染)</h1>
+    <h1>天台機械人操作版本</h1>
     
     <div class="header-controls">
         <select id="modeSelect">
@@ -140,7 +140,7 @@
     let writer;
     let reader;
 
-    // 新增: 寫入通訊記錄 UI 的功能
+    // 寫入通訊記錄 UI 的功能
     function logMessage(type, text) {
         const logContent = document.getElementById('logContent');
         if (!logContent) return;
@@ -157,7 +157,7 @@
         logContent.scrollTop = logContent.scrollHeight; // 自動捲動到底部
     }
 
-    // 新增: 讀取 Microbit 傳來資料的迴圈
+    // 讀取 Microbit 傳來資料的迴圈
     async function readLoop() {
         const textDecoder = new TextDecoderStream();
         const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
@@ -217,8 +217,8 @@
         }
         try {
             const encoder = new TextEncoder();
-            // 發送字串並加上換行符，以利 Microbit Python/MakeCode 讀取
-            await writer.write(encoder.encode(text + "\r\n")); 
+            // 已改以純「換行 \n」方式傳送
+            await writer.write(encoder.encode(text + "\n")); 
             console.log("已發送:", text);
             logMessage('sent', text);
         } catch (error) {
@@ -533,6 +533,7 @@
     let knnClassifier;
     let isPredicting = false;
     let addExampleInterval;
+    let isLearning = false;
 
     // 啟動鏡頭
     navigator.mediaDevices.getUserMedia({ video: true })
@@ -544,7 +545,7 @@
         video.classList.toggle('flipped');
     });
 
-    // 建立結果表格 (移出 modelReady 讓他一載入網頁就先畫出來)
+    // 建立結果表格
     const tbody = document.getElementById('resultTableBody');
     function initTable() {
         tbody.innerHTML = '';
@@ -575,12 +576,20 @@
     learnBtns.forEach(btn => {
         let cId = parseInt(btn.getAttribute('data-class'));
         
-        const startLearning = () => {
-            if(!knnClassifier) return;
+        const startLearning = (e) => {
+            // 防護機制，避免部分裝置同時觸發 touchstart 和 mousedown
+            if (e && e.cancelable) e.preventDefault(); 
+            if (!knnClassifier || isLearning) return;
+            
+            isLearning = true;
+            clearInterval(addExampleInterval); // 確保前一個計時器被清空
             addExample(cId); // 立即學習一張
             addExampleInterval = setInterval(() => addExample(cId), 100); // 持續學習
         };
-        const stopLearning = () => {
+
+        const stopLearning = (e) => {
+            if (e && e.cancelable) e.preventDefault();
+            isLearning = false;
             clearInterval(addExampleInterval);
         };
 
@@ -589,16 +598,24 @@
         btn.addEventListener('mouseleave', stopLearning);
         
         // 支援觸控螢幕
-        btn.addEventListener('touchstart', (e) => { e.preventDefault(); startLearning(); }, {passive: false});
-        btn.addEventListener('touchend', (e) => { e.preventDefault(); stopLearning(); }, {passive: false});
+        btn.addEventListener('touchstart', startLearning, {passive: false});
+        btn.addEventListener('touchend', stopLearning, {passive: false});
     });
 
     function addExample(classIndex) {
-        if (!featureExtractor) return;
-        const features = featureExtractor.infer(video);
-        knnClassifier.addExample(features, classIndex.toString());
-        exampleCounts[classIndex]++;
-        document.getElementById(`count-${classIndex}`).innerText = exampleCounts[classIndex];
+        // 確保視訊已加載，且模型已準備好
+        if (!featureExtractor || !knnClassifier || video.readyState < 2) return;
+        try {
+            const features = featureExtractor.infer(video);
+            knnClassifier.addExample(features, classIndex.toString());
+            exampleCounts[classIndex]++;
+            
+            // 更新 UI 數量顯示
+            const countEl = document.getElementById(`count-${classIndex}`);
+            if(countEl) countEl.innerText = exampleCounts[classIndex];
+        } catch (error) {
+            console.error("加入樣本時發生錯誤:", error);
+        }
     }
 
     // 辨認邏輯
@@ -631,9 +648,11 @@
                 classNames.forEach((_, i) => {
                     let conf = result.confidencesByLabel[i.toString()] || 0;
                     let el = document.getElementById(`conf-${i}`);
-                    el.innerText = (conf * 100).toFixed(1) + "%";
-                    // 若大於 50% 特別標示顏色
-                    el.style.color = conf > 0.5 ? '#4CAF50' : '#555';
+                    if(el) {
+                        el.innerText = (conf * 100).toFixed(1) + "%";
+                        // 若大於 50% 特別標示顏色
+                        el.style.color = conf > 0.5 ? '#4CAF50' : '#555';
+                    }
                 });
             }
             // 使用 requestAnimationFrame 達到流暢度
