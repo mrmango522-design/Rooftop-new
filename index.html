@@ -31,9 +31,10 @@
         canvas { max-width: 100%; height: auto; cursor: default; }
 
         /* --- 狀態及按鈕列 (Area 2) --- */
-        #statusArea { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+        #statusArea { display: flex; gap: 15px; justify-content: center; align-items: center; flex-wrap: wrap; }
         .action-btn { background-color: #2196F3; color: white; border: none; font-weight: bold; box-shadow: 0 4px 6px rgba(33, 150, 243, 0.3); }
         .action-btn:hover { background-color: #1e88e5; }
+        #aiStatusDisplay { padding: 10px 15px; background: #e8f4f8; border-radius: 8px; font-weight: bold; color: #2c3e50; border: 2px solid #b3e5fc; font-size: 15px; min-width: 200px; text-align: center; }
 
         /* --- 鏡頭辨認與學習 (Area 3) --- */
         .camera-section { display: flex; flex-direction: column; align-items: center; gap: 15px; }
@@ -87,7 +88,7 @@
     <div class="section">
         <h2>狀態及按鈕列</h2>
         <div id="statusArea">
-            <!-- 按鈕由 JS 動態生成 -->
+            <!-- 按鈕及 AI 狀態由 JS 動態生成 -->
         </div>
         
         <!-- Microbit 通訊記錄框 -->
@@ -302,16 +303,18 @@
         robot.animY += (robot.y - robot.animY) * 0.04;
 
         // 檢查機械人是否處於「停下」狀態，並根據目前的 AI 結果將地磚上色
-        if (isPatrolling && patrolIndex < patrolPath.length) {
-            let isStopped = Math.abs(robot.x - robot.animX) < 0.1 && Math.abs(robot.y - robot.animY) < 0.1;
-            if (isStopped) {
-                let curX = patrolPath[patrolIndex].x;
-                let curY = patrolPath[patrolIndex].y;
-                if (currentAiClass === 0) { // Class 1 (裂縫地磚 -> 紅色)
-                    gridColors[curY][curX] = '#ff9999';
-                } else if (currentAiClass === 1) { // Class 2 (正常地磚 -> 綠色)
-                    gridColors[curY][curX] = '#99ff99';
-                }
+        // (判斷 animX 和 animY 是否非常接近目標 x 和 y)
+        let isStopped = Math.abs(robot.x - robot.animX) < 0.1 && Math.abs(robot.y - robot.animY) < 0.1;
+        if (isStopped) {
+            let curX = robot.x;
+            let curY = robot.y;
+            
+            if (currentAiClass === 0) { 
+                // Class 1 (裂縫地磚 -> 紅色)
+                gridColors[curY][curX] = '#ff9999';
+            } else if (currentAiClass === 1) { 
+                // Class 2 (正常地磚 -> 綠色)
+                gridColors[curY][curX] = '#99ff99';
             }
         }
 
@@ -518,8 +521,9 @@
                 sendCommand('GR');
                 robot.x = 0; robot.y = 0; robot.animX = 0; robot.animY = 0;
                 isPatrolling = false; patrolIndex = 0;
-                // 重設地磚顏色
+                // 重設地磚顏色，並默認第一塊磚(0,0)為綠色
                 gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
+                gridColors[0][0] = '#99ff99'; 
             };
 
             const btnStart = document.createElement('button');
@@ -530,6 +534,8 @@
                 isPatrolling = true;
                 patrolIndex = 0;
                 robot.x = patrolPath[0].x; robot.y = patrolPath[0].y;
+                // 確保出發時第一格默認是綠色
+                if(!gridColors[0][0]) gridColors[0][0] = '#99ff99'; 
                 
                 // 追加 2 秒的初始等待時間
                 lastMoveTime = performance.now() + 2000; 
@@ -537,6 +543,10 @@
 
             statusArea.appendChild(btnReady);
             statusArea.appendChild(btnStart);
+
+            // 剛切換至此模式時也默認上色
+            gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
+            gridColors[0][0] = '#99ff99';
 
         } else if (currentMode === 'innerWall' || currentMode === 'outerWall') {
             const prefix = currentMode === 'innerWall' ? 'In' : 'Out';
@@ -562,6 +572,12 @@
             btnReady.onclick = () => sendCommand('Control Ready');
             statusArea.appendChild(btnReady);
         }
+
+        // --- 加入 AI 狀態顯示面板 ---
+        const aiStatusDiv = document.createElement('div');
+        aiStatusDiv.id = 'aiStatusDisplay';
+        aiStatusDiv.innerText = 'AI 辨識結果: 尚未開始辨識';
+        statusArea.appendChild(aiStatusDiv);
     }
 
     modeSelect.addEventListener('change', renderMode);
@@ -624,7 +640,7 @@
     // 開始初始化
     initAI();
 
-    // 學習特徵 (參照你的方式)
+    // 學習特徵
     function addExample(classId) {
         if (!net || !classifier || video.readyState < 2) return;
         try {
@@ -669,6 +685,8 @@
     // 預測與辨認邏輯
     const togglePredictBtn = document.getElementById('togglePredictBtn');
     togglePredictBtn.addEventListener('click', () => {
+        let aiDisplay = document.getElementById('aiStatusDisplay');
+
         if (!classifier || classifier.getNumClasses() === 0) {
             alert("請先長按學習按鈕提供學習相片！");
             return;
@@ -677,6 +695,7 @@
         if (isPredicting) {
             togglePredictBtn.innerText = "停止辨認";
             togglePredictBtn.style.backgroundColor = "#E91E63";
+            if (aiDisplay) aiDisplay.innerText = 'AI 辨識結果: 辨識中...';
             predictLoop();
         } else {
             togglePredictBtn.innerText = "開始辨認";
@@ -687,12 +706,15 @@
                 if(el) { el.innerText = "0.0%"; el.style.color = '#555'; }
             });
             currentAiClass = -1; // 停止時重置 AI 結果
+            if (aiDisplay) aiDisplay.innerHTML = 'AI 辨識結果: 尚未開始辨識';
         }
     });
 
     async function predictLoop() {
         if (!isPredicting) return;
         
+        let aiDisplay = document.getElementById('aiStatusDisplay');
+
         if (classifier.getNumClasses() > 0 && video.readyState >= 2) {
             try {
                 const img = tf.browser.fromPixels(video);
@@ -718,8 +740,15 @@
                 // 更新當前最高機率的類別 (若超過 50% 才算數)
                 if (maxConf > 0.5) {
                     currentAiClass = bestClass;
+                    if (aiDisplay) {
+                        if (currentAiClass === 0) aiDisplay.innerHTML = 'AI 辨識結果: <span style="color:#e74c3c">Class 1 (裂縫地磚)</span>';
+                        else if (currentAiClass === 1) aiDisplay.innerHTML = 'AI 辨識結果: <span style="color:#2ecc71">Class 2 (正常地磚)</span>';
+                        else if (currentAiClass === 2) aiDisplay.innerHTML = 'AI 辨識結果: <span style="color:#e74c3c">Class 3 (裂縫牆身)</span>';
+                        else if (currentAiClass === 3) aiDisplay.innerHTML = 'AI 辨識結果: <span style="color:#2ecc71">Class 4 (正常牆身)</span>';
+                    }
                 } else {
                     currentAiClass = -1;
+                    if (aiDisplay) aiDisplay.innerHTML = 'AI 辨識結果: <span style="color:#7f8c8d">辨識中... (相似度不足)</span>';
                 }
 
                 img.dispose();
