@@ -70,7 +70,7 @@
             <option value="ground">檢查地面</option>
             <option value="innerWall">檢查內牆身</option>
             <option value="outerWall">檢查外牆身</option>
-            <option value="manual">手動操控</option>
+            <option value="manual">手掌握控</option>
         </select>
         <button id="connectBtn" class="serial-btn">連接 Microbit (Serial)</button>
     </div>
@@ -508,7 +508,9 @@
                 isPatrolling = true;
                 patrolIndex = 0;
                 robot.x = patrolPath[0].x; robot.y = patrolPath[0].y;
-                lastMoveTime = performance.now();
+                
+                // 追加 2 秒的初始等待時間
+                lastMoveTime = performance.now() + 2000; 
             };
 
             statusArea.appendChild(btnReady);
