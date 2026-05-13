@@ -237,6 +237,10 @@
     let isPatrolling = false;
     let lastMoveTime = 0;
 
+    // AI 全局結果狀態與地磚顏色紀錄
+    let currentAiClass = -1; // -1: 無, 0: Class 1, 1: Class 2
+    let gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
+
     for (let y = 0; y < 5; y++) {
         if (y % 2 === 0) {
             for (let x = 0; x < 5; x++) patrolPath.push({x, y});
@@ -297,6 +301,21 @@
         robot.animX += (robot.x - robot.animX) * 0.04;
         robot.animY += (robot.y - robot.animY) * 0.04;
 
+        // 檢查機械人是否處於「停下」狀態，並根據目前的 AI 結果將地磚上色
+        if (isPatrolling && patrolIndex < patrolPath.length) {
+            let isStopped = Math.abs(robot.x - robot.animX) < 0.1 && Math.abs(robot.y - robot.animY) < 0.1;
+            if (isStopped) {
+                let curX = patrolPath[patrolIndex].x;
+                let curY = patrolPath[patrolIndex].y;
+                if (currentAiClass === 0) { // Class 1 (裂縫地磚 -> 紅色)
+                    gridColors[curY][curX] = '#ff9999';
+                } else if (currentAiClass === 1) { // Class 2 (正常地磚 -> 綠色)
+                    gridColors[curY][curX] = '#99ff99';
+                }
+            }
+        }
+
+        // 畫地磚
         for (let r = 0; r < 5; r++) {
             for (let c = 0; c < 5; c++) {
                 let sx = originX + (c - r) * tileW;
@@ -309,7 +328,8 @@
                 ctx.lineTo(sx - tileW, sy + tileH);
                 ctx.closePath();
                 
-                ctx.fillStyle = (c%2 === r%2) ? '#bdc3c7' : '#ecf0f1';
+                // 優先使用辨識過的顏色，否則使用預設棋盤格色
+                ctx.fillStyle = gridColors[r][c] ? gridColors[r][c] : ((c%2 === r%2) ? '#bdc3c7' : '#ecf0f1');
                 ctx.fill();
                 ctx.strokeStyle = '#7f8c8d';
                 ctx.lineWidth = 1;
@@ -498,6 +518,8 @@
                 sendCommand('GR');
                 robot.x = 0; robot.y = 0; robot.animX = 0; robot.animY = 0;
                 isPatrolling = false; patrolIndex = 0;
+                // 重設地磚顏色
+                gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
             };
 
             const btnStart = document.createElement('button');
@@ -664,6 +686,7 @@
                 let el = document.getElementById(`conf-${i}`);
                 if(el) { el.innerText = "0.0%"; el.style.color = '#555'; }
             });
+            currentAiClass = -1; // 停止時重置 AI 結果
         }
     });
 
@@ -675,6 +698,9 @@
                 const img = tf.browser.fromPixels(video);
                 const result = await classifier.predictClass(net.infer(img, true));
                 
+                let bestClass = -1;
+                let maxConf = 0;
+
                 classNames.forEach((_, i) => {
                     // knnClassifier 回傳的 confidences 是一個物件，例如 {"0": 1, "1": 0}
                     let conf = result.confidences[i.toString()] || 0;
@@ -683,14 +709,26 @@
                         el.innerText = (conf * 100).toFixed(1) + "%";
                         el.style.color = conf > 0.5 ? '#4CAF50' : '#555';
                     }
+                    if (conf > maxConf) {
+                        maxConf = conf;
+                        bestClass = i;
+                    }
                 });
+
+                // 更新當前最高機率的類別 (若超過 50% 才算數)
+                if (maxConf > 0.5) {
+                    currentAiClass = bestClass;
+                } else {
+                    currentAiClass = -1;
+                }
+
                 img.dispose();
             } catch (err) {
                 console.error("辨認錯誤:", err);
             }
         }
         
-        // 遞迴呼叫 (利用 setTimeout 避免過度佔用 CPU，與你提供的檔案相同)
+        // 遞迴呼叫 (利用 setTimeout 避免過度佔用 CPU)
         setTimeout(predictLoop, 200);
     }
 </script>
