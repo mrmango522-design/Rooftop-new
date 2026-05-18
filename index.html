@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>天台機械人操作版本</title>
-    <!-- 引入 TensorFlow.js 取代 ml5.js -->
+    <!-- 引入 TensorFlow.js -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet"></script>
@@ -70,8 +70,8 @@
         <select id="modeSelect">
             <option value="ground">檢查地面</option>
             <option value="innerWall">檢查內牆身</option>
-            <option value="outerWall">檢查外牆身</option>
-            <option value="manual">手掌握控</option>
+            <!-- 移除了外牆身選項 -->
+            <option value="manual">手動操控</option>
         </select>
         <button id="connectBtn" class="serial-btn">連接 Microbit (Serial)</button>
     </div>
@@ -223,7 +223,7 @@
     }
 
     /* =========================================
-       Canvas 渲染與動畫邏輯
+       Canvas 渲染與動畫邏輯 (6x6 系統)
     ========================================= */
     const canvas = document.getElementById('simCanvas');
     const ctx = canvas.getContext('2d');
@@ -231,6 +231,7 @@
     const statusArea = document.getElementById('statusArea');
     
     let currentMode = 'ground';
+    let gridSize = 6; // 統一使用 6x6
     
     let robot = { x: 0, y: 0, animX: 0, animY: 0 };
     let patrolPath = [];
@@ -238,34 +239,36 @@
     let isPatrolling = false;
     let lastMoveTime = 0;
 
-    // AI 全局結果狀態與地磚顏色紀錄
-    let currentAiClass = -1; // -1: 無, 0: Class 1, 1: Class 2
-    let gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
-
-    for (let y = 0; y < 5; y++) {
-        if (y % 2 === 0) {
-            for (let x = 0; x < 5; x++) patrolPath.push({x, y});
-        } else {
-            for (let x = 4; x >= 0; x--) patrolPath.push({x, y});
-        }
-    }
+    // AI 全局結果狀態與地磚/牆身顏色紀錄
+    let currentAiClass = -1; // -1: 無, 0: Class1, 1: Class2, 2: Class3, 3: Class4
+    let gridColors = Array(gridSize).fill(null).map(() => Array(gridSize).fill(null));
+    let wallColors = {
+        top: Array(gridSize).fill(null),
+        right: Array(gridSize).fill(null),
+        bottom: Array(gridSize).fill(null),
+        left: Array(gridSize).fill(null)
+    };
 
     const manualBtns = [
-        { id: 'up', text: '↑', x: 200, y: 100, w: 70, h: 70, cmd: 'Move Up', isPressed: false },
-        { id: 'down', text: '↓', x: 200, y: 260, w: 70, h: 70, cmd: 'Move Down', isPressed: false },
-        { id: 'left', text: '←', x: 120, y: 180, w: 70, h: 70, cmd: 'Move Left', isPressed: false },
-        { id: 'right', text: '→', x: 280, y: 180, w: 70, h: 70, cmd: 'Move Right', isPressed: false },
-        { id: 'rise', text: '升起 ▲', x: 500, y: 130, w: 140, h: 60, cmd: 'Rise', isPressed: false },
-        { id: 'lower', text: '降低 ▼', x: 500, y: 220, w: 140, h: 60, cmd: 'Lower', isPressed: false }
+        { id: 'up', text: '前進', x: 180, y: 120, w: 70, h: 70, cmd: 'Forward', isPressed: false },
+        { id: 'down', text: '後退', x: 180, y: 280, w: 70, h: 70, cmd: 'Backward', isPressed: false },
+        { id: 'left', text: '左移', x: 100, y: 200, w: 70, h: 70, cmd: 'Left', isPressed: false },
+        { id: 'right', text: '右移', x: 260, y: 200, w: 70, h: 70, cmd: 'Right', isPressed: false },
+        { id: 'antiClock', text: '左轉', x: 100, y: 120, w: 70, h: 70, cmd: 'AntiClock', isPressed: false },
+        { id: 'clock', text: '右轉', x: 260, y: 120, w: 70, h: 70, cmd: 'Clock', isPressed: false },
+        { id: 'rise', text: '升起', x: 420, y: 120, w: 90, h: 60, cmd: 'Up', isPressed: false },
+        { id: 'lower', text: '降低', x: 420, y: 200, w: 90, h: 60, cmd: 'Down', isPressed: false },
+        { id: 'up2', text: '向上', x: 530, y: 120, w: 90, h: 60, cmd: 'Up2', isPressed: false },
+        { id: 'down2', text: '向下', x: 530, y: 200, w: 90, h: 60, cmd: 'Down2', isPressed: false },
+        { id: 'open', text: '開爪', x: 640, y: 120, w: 90, h: 60, cmd: 'Open', isPressed: false },
+        { id: 'close', text: '關爪', x: 640, y: 200, w: 90, h: 60, cmd: 'Close', isPressed: false }
     ];
 
     function render(time) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (currentMode === 'ground') {
-            drawGround(time);
-        } else if (currentMode === 'innerWall' || currentMode === 'outerWall') {
-            drawWall();
+        if (currentMode === 'ground' || currentMode === 'innerWall') {
+            drawScene(time); // 合併地面與內牆的渲染引擎
         } else if (currentMode === 'manual') {
             drawManualControls();
         }
@@ -274,17 +277,108 @@
     }
     requestAnimationFrame(render);
 
-    function drawGround(time) {
-        const tileW = 60;
-        const tileH = 30;
-        const originX = canvas.width / 2;
-        const originY = 80;
+    // 繪製單一牆身片段
+    function drawWallSegment(originX, originY, c, r, side, color, tileW, tileH) {
+        let sx = originX + (c - r) * tileW;
+        let sy = originY + (c + r) * tileH;
+        let h = 70; // 牆面高度
 
-        // 判斷下一次移動是否為 Y 值改變
-        let currentDelay = 2000;
-        if (isPatrolling && patrolIndex + 1 < patrolPath.length) {
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#7f8c8d';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+
+        if (side === 'top') {
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx + tileW, sy + tileH);
+            ctx.lineTo(sx + tileW, sy + tileH - h);
+            ctx.lineTo(sx, sy - h);
+        } else if (side === 'left') {
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx - tileW, sy + tileH);
+            ctx.lineTo(sx - tileW, sy + tileH - h);
+            ctx.lineTo(sx, sy - h);
+        } else if (side === 'right') {
+            ctx.moveTo(sx + tileW, sy + tileH);
+            ctx.lineTo(sx, sy + 2 * tileH);
+            ctx.lineTo(sx, sy + 2 * tileH - h);
+            ctx.lineTo(sx + tileW, sy + tileH - h);
+        } else if (side === 'bottom') {
+            ctx.moveTo(sx - tileW, sy + tileH);
+            ctx.lineTo(sx, sy + 2 * tileH);
+            ctx.lineTo(sx, sy + 2 * tileH - h);
+            ctx.lineTo(sx - tileW, sy + tileH - h);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    // 抽出機械人繪製指令以方便調整縮放比例
+    function drawRobot(rx, ry) {
+        ctx.fillStyle = '#34495e'; // 左履帶
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(rx - 22, ry - 25, 12, 35, 4);
+        else ctx.rect(rx - 22, ry - 25, 12, 35);
+        ctx.fill();
+        ctx.fillStyle = '#2c3e50';
+        for(let i=0; i<4; i++) ctx.fillRect(rx - 22, ry - 20 + i*8, 12, 3);
+
+        ctx.fillStyle = '#34495e'; // 右履帶
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(rx + 10, ry - 25, 12, 35, 4);
+        else ctx.rect(rx + 10, ry - 25, 12, 35);
+        ctx.fill();
+        ctx.fillStyle = '#2c3e50';
+        for(let i=0; i<4; i++) ctx.fillRect(rx + 10, ry - 20 + i*8, 12, 3);
+
+        ctx.fillStyle = '#f1c40f'; // 主車體
+        ctx.fillRect(rx - 15, ry - 32, 30, 35);
+        ctx.fillStyle = '#f39c12';
+        ctx.fillRect(rx + 10, ry - 32, 5, 35); 
+        ctx.fillRect(rx - 15, ry - 2, 30, 5);  
+        
+        ctx.fillStyle = '#3498db'; // 燈與積木點
+        ctx.fillRect(rx - 10, ry - 25, 6, 4);
+        ctx.fillRect(rx + 4, ry - 25, 6, 4);
+        ctx.fillStyle = '#e67e22';
+        ctx.beginPath(); ctx.arc(rx - 6, ry - 12, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(rx + 6, ry - 12, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(rx - 6, ry - 4, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(rx + 6, ry - 4, 3, 0, Math.PI*2); ctx.fill();
+
+        ctx.fillStyle = '#7f8c8d'; // 機械臂
+        ctx.beginPath(); ctx.ellipse(rx, ry - 32, 12, 6, 0, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#95a5a6';
+        ctx.fillRect(rx - 6, ry - 40, 12, 8);
+        ctx.strokeStyle = '#e67e22'; 
+        ctx.lineWidth = 6; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(rx, ry - 38); ctx.lineTo(rx + 15, ry - 55); ctx.stroke();
+        ctx.strokeStyle = '#d35400'; 
+        ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(rx + 15, ry - 55); ctx.lineTo(rx + 28, ry - 45); ctx.stroke();
+        ctx.strokeStyle = '#bdc3c7'; 
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(rx + 28, ry - 45); ctx.lineTo(rx + 35, ry - 48); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(rx + 28, ry - 45); ctx.lineTo(rx + 33, ry - 38); ctx.stroke();
+        ctx.fillStyle = '#2c3e50'; 
+        ctx.beginPath(); ctx.arc(rx, ry - 38, 4, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(rx + 15, ry - 55, 3, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(rx + 28, ry - 45, 2.5, 0, Math.PI*2); ctx.fill();
+    }
+
+    function drawScene(time) {
+        // 因應 6x6 將格寬稍微調小
+        const tileW = 50;
+        const tileH = 25;
+        const originX = canvas.width / 2;
+        const originY = currentMode === 'innerWall' ? 120 : 80;
+
+        // 計算速度
+        let currentDelay = currentMode === 'innerWall' ? 1000 : 2000;
+        if (currentMode === 'ground' && isPatrolling && patrolIndex + 1 < patrolPath.length) {
             if (patrolPath[patrolIndex].y !== patrolPath[patrolIndex + 1].y) {
-                currentDelay = 3000; // 換行時等待 3 秒
+                currentDelay = 3000; // 地面換行等待
             }
         }
 
@@ -299,28 +393,44 @@
             }
         }
 
-        robot.animX += (robot.x - robot.animX) * 0.04;
-        robot.animY += (robot.y - robot.animY) * 0.04;
+        let lerpSpeed = currentMode === 'innerWall' ? 0.08 : 0.04;
+        robot.animX += (robot.x - robot.animX) * lerpSpeed;
+        robot.animY += (robot.y - robot.animY) * lerpSpeed;
 
-        // 檢查機械人是否處於「停下」狀態，並根據目前的 AI 結果將地磚上色
-        // (判斷 animX 和 animY 是否非常接近目標 x 和 y)
+        // 當機械人停下且還在巡航時，替周遭環境上色
         let isStopped = Math.abs(robot.x - robot.animX) < 0.1 && Math.abs(robot.y - robot.animY) < 0.1;
-        if (isStopped) {
+        if (isStopped && isPatrolling && patrolIndex < patrolPath.length) {
             let curX = robot.x;
             let curY = robot.y;
             
-            if (currentAiClass === 0) { 
-                // Class 1 (裂縫地磚 -> 紅色)
-                gridColors[curY][curX] = '#ff9999';
-            } else if (currentAiClass === 1) { 
-                // Class 2 (正常地磚 -> 綠色)
-                gridColors[curY][curX] = '#99ff99';
+            if (currentMode === 'ground') {
+                if (currentAiClass === 0) gridColors[curY][curX] = '#ff9999';
+                else if (currentAiClass === 1) gridColors[curY][curX] = '#99ff99';
+            } else if (currentMode === 'innerWall') {
+                let wColor = null;
+                if (currentAiClass === 2) wColor = '#ff9999';      // Class 3 -> 紅牆
+                else if (currentAiClass === 3) wColor = '#99ff99'; // Class 4 -> 綠牆
+
+                if (wColor) {
+                    if (curY === 0) wallColors.top[curX] = wColor;
+                    else if (curX === gridSize - 1) wallColors.right[curY] = wColor;
+                    else if (curY === gridSize - 1) wallColors.bottom[curX] = wColor;
+                    else if (curX === 0) wallColors.left[curY] = wColor;
+                }
             }
         }
 
-        // 畫地磚
-        for (let r = 0; r < 5; r++) {
-            for (let c = 0; c < 5; c++) {
+        // 1. 繪製背側牆身
+        if (currentMode === 'innerWall') {
+            for (let i = 0; i < gridSize; i++) {
+                drawWallSegment(originX, originY, i, 0, 'top', wallColors.top[i] || '#bdc3c7', tileW, tileH);
+                drawWallSegment(originX, originY, 0, i, 'left', wallColors.left[i] || '#a4b0be', tileW, tileH);
+            }
+        }
+
+        // 2. 繪製 6x6 地磚
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
                 let sx = originX + (c - r) * tileW;
                 let sy = originY + (c + r) * tileH;
                 
@@ -331,8 +441,7 @@
                 ctx.lineTo(sx - tileW, sy + tileH);
                 ctx.closePath();
                 
-                // 優先使用辨識過的顏色，否則使用預設棋盤格色
-                ctx.fillStyle = gridColors[r][c] ? gridColors[r][c] : ((c%2 === r%2) ? '#bdc3c7' : '#ecf0f1');
+                ctx.fillStyle = gridColors[r][c] ? gridColors[r][c] : ((c%2 === r%2) ? '#dcdde1' : '#f5f6fa');
                 ctx.fill();
                 ctx.strokeStyle = '#7f8c8d';
                 ctx.lineWidth = 1;
@@ -345,102 +454,24 @@
             }
         }
 
+        // 3. 繪製機械人 (置中縮小，以配合格數)
         let rx = originX + (robot.animX - robot.animY) * tileW;
         let ry = originY + (robot.animX + robot.animY) * tileH + tileH;
-        
-        // 畫機械人 (黃色積木履帶車含機械臂)
-        // 1. 左履帶 (深灰色)
-        ctx.fillStyle = '#34495e';
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(rx - 22, ry - 25, 12, 35, 4);
-        else ctx.rect(rx - 22, ry - 25, 12, 35);
-        ctx.fill();
-        ctx.fillStyle = '#2c3e50'; // 履帶紋路
-        for(let i=0; i<4; i++) ctx.fillRect(rx - 22, ry - 20 + i*8, 12, 3);
-
-        // 2. 右履帶 (深灰色)
-        ctx.fillStyle = '#34495e';
-        ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(rx + 10, ry - 25, 12, 35, 4);
-        else ctx.rect(rx + 10, ry - 25, 12, 35);
-        ctx.fill();
-        ctx.fillStyle = '#2c3e50'; // 履帶紋路
-        for(let i=0; i<4; i++) ctx.fillRect(rx + 10, ry - 20 + i*8, 12, 3);
-
-        // 3. 主車體 (黃色積木)
-        ctx.fillStyle = '#f1c40f';
-        ctx.fillRect(rx - 15, ry - 32, 30, 35);
-        ctx.fillStyle = '#f39c12'; // 立體陰影 (積木邊緣)
-        ctx.fillRect(rx + 10, ry - 32, 5, 35); 
-        ctx.fillRect(rx - 15, ry - 2, 30, 5);  
-        
-        // 車頭燈 (藍色) 與 積木凸起點 (Studs)
-        ctx.fillStyle = '#3498db';
-        ctx.fillRect(rx - 10, ry - 25, 6, 4);
-        ctx.fillRect(rx + 4, ry - 25, 6, 4);
-        ctx.fillStyle = '#e67e22';
-        ctx.beginPath(); ctx.arc(rx - 6, ry - 12, 3, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rx + 6, ry - 12, 3, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rx - 6, ry - 4, 3, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rx + 6, ry - 4, 3, 0, Math.PI*2); ctx.fill();
-
-        // 4. 上方機械臂
-        ctx.fillStyle = '#7f8c8d'; // 旋轉底座
-        ctx.beginPath(); ctx.ellipse(rx, ry - 32, 12, 6, 0, 0, Math.PI*2); ctx.fill();
-        ctx.fillStyle = '#95a5a6';
-        ctx.fillRect(rx - 6, ry - 40, 12, 8);
-
-        ctx.strokeStyle = '#e67e22'; // 第一段手臂 (橙色)
-        ctx.lineWidth = 6;
-        ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(rx, ry - 38); ctx.lineTo(rx + 15, ry - 55); ctx.stroke();
-
-        ctx.strokeStyle = '#d35400'; // 第二段手臂 (深橙色)
-        ctx.lineWidth = 4;
-        ctx.beginPath(); ctx.moveTo(rx + 15, ry - 55); ctx.lineTo(rx + 28, ry - 45); ctx.stroke();
-
-        ctx.strokeStyle = '#bdc3c7'; // 夾爪 (灰色)
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(rx + 28, ry - 45); ctx.lineTo(rx + 35, ry - 48); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(rx + 28, ry - 45); ctx.lineTo(rx + 33, ry - 38); ctx.stroke();
-
-        ctx.fillStyle = '#2c3e50'; // 關節點
-        ctx.beginPath(); ctx.arc(rx, ry - 38, 4, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rx + 15, ry - 55, 3, 0, Math.PI*2); ctx.fill();
-        ctx.beginPath(); ctx.arc(rx + 28, ry - 45, 2.5, 0, Math.PI*2); ctx.fill();
-    }
-
-    function drawWall() {
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2 + 20;
-
         ctx.save();
-        ctx.translate(cx, cy);
-        ctx.scale(1, 0.5);
-        ctx.rotate(-Math.PI / 4);
-
-        ctx.fillStyle = currentMode === 'innerWall' ? '#81c784' : '#64b5f6';
-        ctx.fillRect(-150, -150, 300, 300);
-        
-        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = 2;
-        for(let i = -150; i <= 150; i+= 50) {
-            ctx.beginPath(); ctx.moveTo(i, -150); ctx.lineTo(i, 150); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(-150, i); ctx.lineTo(150, i); ctx.stroke();
-        }
-
+        ctx.translate(rx, ry);
+        ctx.scale(0.85, 0.85); 
+        drawRobot(0, 0);
         ctx.restore();
 
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 28px Arial';
-        ctx.textAlign = 'center';
-        ctx.shadowColor = "rgba(0,0,0,0.5)";
-        ctx.shadowBlur = 4;
-        ctx.shadowOffsetX = 2;
-        ctx.shadowOffsetY = 2;
-        let text = currentMode === 'innerWall' ? '內牆身視角' : '外牆身視角';
-        ctx.fillText(text, cx, cy - 80);
-        ctx.shadowColor = "transparent";
+        // 4. 繪製前側牆身 (半透明以防完全擋住機械人)
+        if (currentMode === 'innerWall') {
+            ctx.globalAlpha = 0.55; 
+            for (let i = 0; i < gridSize; i++) {
+                drawWallSegment(originX, originY, gridSize - 1, i, 'right', wallColors.right[i] || '#95a5a6', tileW, tileH);
+                drawWallSegment(originX, originY, i, gridSize - 1, 'bottom', wallColors.bottom[i] || '#bdc3c7', tileW, tileH);
+            }
+            ctx.globalAlpha = 1.0;
+        }
     }
 
     function drawManualControls() {
@@ -452,11 +483,9 @@
             ctx.beginPath();
             ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
             ctx.fill();
-            
             ctx.lineWidth = 2;
             ctx.strokeStyle = '#0d47a1';
             ctx.stroke();
-
             ctx.fillStyle = 'white';
             ctx.font = 'bold 20px Arial';
             ctx.fillText(btn.text, btn.x + btn.w/2, btn.y + btn.h/2);
@@ -464,10 +493,13 @@
 
         ctx.fillStyle = '#ecf0f1';
         ctx.font = '16px Arial';
-        ctx.fillText('方向操控 (D-Pad)', 235, 50);
-        ctx.fillText('高度操控 (Z-Axis)', 570, 80);
+        ctx.fillText('底盤移動 (D-Pad)', 215, 80);
+        ctx.fillText('車身高度', 465, 80);
+        ctx.fillText('機械臂', 575, 80);
+        ctx.fillText('夾爪', 685, 80);
     }
 
+    // --- Canvas 滑鼠互動 (用於手動操控) ---
     function getMousePos(evt) {
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
@@ -508,72 +540,91 @@
     canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleCanvasInteract(e.touches[0], true); }, {passive: false});
     canvas.addEventListener('touchend', (e) => { e.preventDefault(); handleCanvasInteract(e.changedTouches[0], false); }, {passive: false});
 
+    /* =========================================
+       UI 模式切換邏輯
+    ========================================= */
     function renderMode() {
         currentMode = modeSelect.value;
         statusArea.innerHTML = '';
         isPatrolling = false;
 
-        if (currentMode === 'ground') {
+        if (currentMode === 'ground' || currentMode === 'innerWall') {
             const btnReady = document.createElement('button');
             btnReady.className = 'action-btn';
             btnReady.innerText = '設置機械人';
             btnReady.onclick = () => {
-                sendCommand('GR');
+                sendCommand(currentMode === 'ground' ? 'GR' : 'WR');
                 robot.x = 0; robot.y = 0; robot.animX = 0; robot.animY = 0;
                 isPatrolling = false; patrolIndex = 0;
-                // 重設地磚顏色，並默認第一塊磚(0,0)為綠色
-                gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
-                gridColors[0][0] = '#99ff99'; 
+
+                if (currentMode === 'ground') {
+                    gridColors = Array(gridSize).fill(null).map(() => Array(gridSize).fill(null));
+                    gridColors[0][0] = '#99ff99'; // 默認起點綠色
+                } else {
+                    wallColors = { top: Array(gridSize).fill(null), right: Array(gridSize).fill(null), bottom: Array(gridSize).fill(null), left: Array(gridSize).fill(null) };
+                    wallColors.top[0] = '#99ff99'; // 內牆模式默認第一塊牆綠色
+                }
             };
 
             const btnStart = document.createElement('button');
             btnStart.className = 'action-btn';
-            btnStart.innerText = '開始巡航檢查';
+            btnStart.innerText = currentMode === 'ground' ? '開始巡航檢查' : '開始檢查內牆';
             btnStart.onclick = () => {
-                sendCommand('GS');
+                sendCommand(currentMode === 'ground' ? 'GS' : 'WP');
+                
+                // 自動啟動鏡頭辨識
+                if (!isPredicting) {
+                    if (classifier && classifier.getNumClasses() > 0) {
+                        document.getElementById('togglePredictBtn').click();
+                    } else {
+                        alert("提示：尚未完成任何相片學習，請先長按按鈕學習，否則無法啟動 AI！");
+                    }
+                }
+
                 isPatrolling = true;
                 patrolIndex = 0;
+                patrolPath = [];
+
+                if (currentMode === 'ground') {
+                    // S型路徑 6x6
+                    for (let y = 0; y < gridSize; y++) {
+                        if (y % 2 === 0) {
+                            for (let x = 0; x < gridSize; x++) patrolPath.push({x, y});
+                        } else {
+                            for (let x = gridSize - 1; x >= 0; x--) patrolPath.push({x, y});
+                        }
+                    }
+                } else {
+                    // 繞場外圍邊緣 6x6
+                    for (let x = 0; x < gridSize; x++) patrolPath.push({x: x, y: 0});
+                    for (let y = 1; y < gridSize; y++) patrolPath.push({x: gridSize - 1, y: y});
+                    for (let x = gridSize - 2; x >= 0; x--) patrolPath.push({x: x, y: gridSize - 1});
+                    for (let y = gridSize - 2; y > 0; y--) patrolPath.push({x: 0, y: y});
+                }
+
                 robot.x = patrolPath[0].x; robot.y = patrolPath[0].y;
-                // 確保出發時第一格默認是綠色
-                if(!gridColors[0][0]) gridColors[0][0] = '#99ff99'; 
                 
-                // 追加 2 秒的初始等待時間
-                lastMoveTime = performance.now() + 2000; 
+                if (currentMode === 'ground' && !gridColors[0][0]) gridColors[0][0] = '#99ff99';
+                if (currentMode === 'innerWall' && !wallColors.top[0]) wallColors.top[0] = '#99ff99';
+                
+                lastMoveTime = performance.now() + 2000; // 延遲出發
             };
 
             statusArea.appendChild(btnReady);
             statusArea.appendChild(btnStart);
 
-            // 剛切換至此模式時也默認上色
-            gridColors = Array(5).fill(null).map(() => Array(5).fill(null));
-            gridColors[0][0] = '#99ff99';
-
-        } else if (currentMode === 'innerWall' || currentMode === 'outerWall') {
-            const prefix = currentMode === 'innerWall' ? 'In' : 'Out';
-            const label = currentMode === 'innerWall' ? '內牆' : '外牆';
-
-            const btnReady = document.createElement('button');
-            btnReady.className = 'action-btn';
-            btnReady.innerText = '重設位置';
-            btnReady.onclick = () => sendCommand(`${prefix} Ready`);
-
-            const btnStart = document.createElement('button');
-            btnStart.className = 'action-btn';
-            btnStart.innerText = `開始檢查${label}`;
-            btnStart.onclick = () => sendCommand(`${prefix} Start`);
-
-            statusArea.appendChild(btnReady);
-            statusArea.appendChild(btnStart);
+            // 剛切換模式時重置顏色
+            btnReady.onclick();
 
         } else if (currentMode === 'manual') {
             const btnReady = document.createElement('button');
             btnReady.className = 'action-btn';
             btnReady.innerText = '重設位置';
-            btnReady.onclick = () => sendCommand('Control Ready');
+            btnReady.onclick = () => sendCommand('DR');
             statusArea.appendChild(btnReady);
         }
 
-        // --- 加入 AI 狀態顯示面板 ---
+        // 狀態顯示面板
         const aiStatusDiv = document.createElement('div');
         aiStatusDiv.id = 'aiStatusDisplay';
         aiStatusDiv.innerText = 'AI 辨識結果: 尚未開始辨識';
@@ -596,12 +647,10 @@
     let learningInterval;
     let counts = {0: 0, 1: 0, 2: 0, 3: 0};
 
-    // 翻轉鏡頭
     flipBtn.addEventListener('click', () => {
         video.classList.toggle('flipped');
     });
 
-    // 初始化表格
     const tbody = document.getElementById('resultTableBody');
     function initTable() {
         tbody.innerHTML = '';
@@ -617,7 +666,6 @@
     }
     initTable();
 
-    // 載入 AI 模型並啟動鏡頭
     async function initAI() {
         console.log("正在載入 TensorFlow.js AI 模型...");
         net = await mobilenet.load();
@@ -636,11 +684,8 @@
             alert("請允許存取鏡頭！");
         }
     }
-    
-    // 開始初始化
     initAI();
 
-    // 學習特徵
     function addExample(classId) {
         if (!net || !classifier || video.readyState < 2) return;
         try {
@@ -650,22 +695,20 @@
             counts[classId]++;
             document.getElementById(`count-${classId}`).innerText = counts[classId];
             
-            img.dispose(); // 關鍵：釋放記憶體避免卡頓
+            img.dispose(); 
         } catch(error) {
             console.error("提取特徵時出錯:", error);
         }
     }
 
-    // AI 學習按鈕綁定 (使用 onmousedown / ontouchstart)
     const setupLearnButton = (elId, classId) => {
         const el = document.getElementById(elId);
         if(!el) return;
-        
         const startLearn = (e) => { 
             if(e && e.cancelable) e.preventDefault();
             if(!net) return;
             learningInterval = setInterval(() => addExample(classId), 100); 
-            addExample(classId); // 按下瞬間立刻存一張
+            addExample(classId); 
         };
         const stopLearn = (e) => { 
             if(e && e.cancelable) e.preventDefault();
@@ -676,13 +719,11 @@
         el.onmouseup = el.onmouseleave = el.ontouchend = stopLearn;
     };
 
-    // 綁定 4 個類別的學習按鈕
     setupLearnButton('learn-0', 0);
     setupLearnButton('learn-1', 1);
     setupLearnButton('learn-2', 2);
     setupLearnButton('learn-3', 3);
 
-    // 預測與辨認邏輯
     const togglePredictBtn = document.getElementById('togglePredictBtn');
     togglePredictBtn.addEventListener('click', () => {
         let aiDisplay = document.getElementById('aiStatusDisplay');
@@ -700,12 +741,11 @@
         } else {
             togglePredictBtn.innerText = "開始辨認";
             togglePredictBtn.style.backgroundColor = "#9C27B0";
-            // 歸零顯示
             classNames.forEach((_, i) => {
                 let el = document.getElementById(`conf-${i}`);
                 if(el) { el.innerText = "0.0%"; el.style.color = '#555'; }
             });
-            currentAiClass = -1; // 停止時重置 AI 結果
+            currentAiClass = -1; 
             if (aiDisplay) aiDisplay.innerHTML = 'AI 辨識結果: 尚未開始辨識';
         }
     });
@@ -724,7 +764,6 @@
                 let maxConf = 0;
 
                 classNames.forEach((_, i) => {
-                    // knnClassifier 回傳的 confidences 是一個物件，例如 {"0": 1, "1": 0}
                     let conf = result.confidences[i.toString()] || 0;
                     let el = document.getElementById(`conf-${i}`);
                     if(el) {
@@ -737,7 +776,6 @@
                     }
                 });
 
-                // 更新當前最高機率的類別 (若超過 50% 才算數)
                 if (maxConf > 0.5) {
                     currentAiClass = bestClass;
                     if (aiDisplay) {
@@ -757,7 +795,6 @@
             }
         }
         
-        // 遞迴呼叫 (利用 setTimeout 避免過度佔用 CPU)
         setTimeout(predictLoop, 200);
     }
 </script>
