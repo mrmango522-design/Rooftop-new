@@ -70,7 +70,6 @@
         <select id="modeSelect">
             <option value="ground">檢查地面</option>
             <option value="innerWall">檢查內牆身</option>
-            <!-- 移除了外牆身選項 -->
             <option value="manual">手動操控</option>
         </select>
         <button id="connectBtn" class="serial-btn">連接 Microbit (Serial)</button>
@@ -254,6 +253,7 @@
         { id: 'down', text: '後退', x: 180, y: 280, w: 70, h: 70, cmd: 'Backward', isPressed: false },
         { id: 'left', text: '左移', x: 100, y: 200, w: 70, h: 70, cmd: 'Left', isPressed: false },
         { id: 'right', text: '右移', x: 260, y: 200, w: 70, h: 70, cmd: 'Right', isPressed: false },
+        { id: 'stop', text: '停止', x: 180, y: 200, w: 70, h: 70, cmd: 'Stop', isPressed: false, color: '#e74c3c', pressedColor: '#c0392b' }, // 停止按鈕 (D-pad 正中央)
         { id: 'antiClock', text: '左轉', x: 100, y: 120, w: 70, h: 70, cmd: 'AntiClock', isPressed: false },
         { id: 'clock', text: '右轉', x: 260, y: 120, w: 70, h: 70, cmd: 'Clock', isPressed: false },
         { id: 'rise', text: '升起', x: 420, y: 120, w: 90, h: 60, cmd: 'Up', isPressed: false },
@@ -374,7 +374,7 @@
         const originX = canvas.width / 2;
         const originY = currentMode === 'innerWall' ? 120 : 80;
 
-        // 計算速度
+        // 計算速度 (內牆身為嚴格的每 1 秒一格，地面則是 2 秒或換行 3 秒)
         let currentDelay = currentMode === 'innerWall' ? 1000 : 2000;
         if (currentMode === 'ground' && isPatrolling && patrolIndex + 1 < patrolPath.length) {
             if (patrolPath[patrolIndex].y !== patrolPath[patrolIndex + 1].y) {
@@ -479,12 +479,13 @@
         ctx.textBaseline = 'middle';
 
         manualBtns.forEach(btn => {
-            ctx.fillStyle = btn.isPressed ? '#1565C0' : '#2196F3';
+            // 處理自定義顏色與按壓顏色
+            ctx.fillStyle = btn.isPressed ? (btn.pressedColor || '#1565C0') : (btn.color || '#2196F3');
             ctx.beginPath();
             ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
             ctx.fill();
             ctx.lineWidth = 2;
-            ctx.strokeStyle = '#0d47a1';
+            ctx.strokeStyle = btn.color ? btn.pressedColor : '#0d47a1';
             ctx.stroke();
             ctx.fillStyle = 'white';
             ctx.font = 'bold 20px Arial';
