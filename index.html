@@ -765,8 +765,19 @@
                 let bestClass = -1;
                 let maxConf = 0;
 
+                // 根據當前模式限制可辨認的類別
+                let allowedClasses = [0, 1, 2, 3];
+                if (currentMode === 'ground') allowedClasses = [0, 1];
+                else if (currentMode === 'innerWall') allowedClasses = [2, 3];
+
                 classNames.forEach((_, i) => {
                     let conf = result.confidences[i.toString()] || 0;
+                    
+                    // 如果不是當前模式允許的類別，強制將機率設為 0
+                    if (!allowedClasses.includes(i)) {
+                        conf = 0;
+                    }
+
                     let el = document.getElementById(`conf-${i}`);
                     if(el) {
                         el.innerText = (conf * 100).toFixed(1) + "%";
