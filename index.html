@@ -374,8 +374,8 @@
         const originX = canvas.width / 2;
         const originY = currentMode === 'innerWall' ? 120 : 80;
 
-        // 計算速度 (內牆身為嚴格的每 1 秒一格，地面則是 2 秒或換行 3 秒)
-        let currentDelay = currentMode === 'innerWall' ? 1000 : 2000;
+        // 計算速度 (改為皆是 2 秒一格，地面換行時 3 秒等待)
+        let currentDelay = 2000;
         if (currentMode === 'ground' && isPatrolling && patrolIndex + 1 < patrolPath.length) {
             if (patrolPath[patrolIndex].y !== patrolPath[patrolIndex + 1].y) {
                 currentDelay = 3000; // 地面換行等待
@@ -393,7 +393,8 @@
             }
         }
 
-        let lerpSpeed = currentMode === 'innerWall' ? 0.08 : 0.04;
+        // 配合 2 秒延遲，統一動畫平滑度
+        let lerpSpeed = 0.04;
         robot.animX += (robot.x - robot.animX) * lerpSpeed;
         robot.animY += (robot.y - robot.animY) * lerpSpeed;
 
